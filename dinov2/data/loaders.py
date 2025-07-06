@@ -9,8 +9,10 @@ from typing import Any, Callable, List, Optional, TypeVar
 
 import torch
 from torch.utils.data import Sampler
+import webdataset as wds
 
 from .datasets import ImageNet, ImageNet22k
+from .datasets.antiquities import create_webdataset
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -29,7 +31,10 @@ def _make_bool_str(b: bool) -> str:
     return "yes" if b else "no"
 
 
-def _make_sample_transform(image_transform: Optional[Callable] = None, target_transform: Optional[Callable] = None):
+def _make_sample_transform(
+    image_transform: Optional[Callable] = None,
+    target_transform: Optional[Callable] = None,
+):
     def transform(sample):
         image, target = sample
         if image_transform is not None:
@@ -58,6 +63,11 @@ def _parse_dataset_str(dataset_str: str):
             kwargs["split"] = ImageNet.Split[kwargs["split"]]
     elif name == "ImageNet22k":
         class_ = ImageNet22k
+    elif name == "MyWebDataset":
+        class_ = create_webdataset
+        # We don't need 'extra' or 'split' for a webdataset
+        kwargs.pop("extra", None)
+        kwargs.pop("split", None)
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 
@@ -194,19 +204,24 @@ def make_data_loader(
         collate_fn: Function that performs batch collation
     """
 
-    sampler = _make_sampler(
-        dataset=dataset,
-        type=sampler_type,
-        shuffle=shuffle,
-        seed=seed,
-        size=sampler_size,
-        advance=sampler_advance,
-    )
+    if isinstance(dataset, wds.WebDataset):
+        logger.info("Using a WebDataset, PyTorch sampler will be disabled.")
+        sampler = None
+    else:
+        sampler = _make_sampler(
+            dataset=dataset,
+            type=sampler_type,
+            shuffle=shuffle,
+            seed=seed,
+            size=sampler_size,
+            advance=sampler_advance,
+        )
 
     logger.info("using PyTorch data loader")
     data_loader = torch.utils.data.DataLoader(
         dataset,
         sampler=sampler,
+        shuffle=False if sampler is not None else shuffle,
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=True,

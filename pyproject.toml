@@ -1,3 +1,21 @@
+[project]
+name = "dinov2"
+version = "0.1.0"
+description = "DinoV2 fork for Self Supervised Learning on Unlabeled Images"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fvcore>=0.1.5.post20221221",
+    "iopath>=0.1.10",
+    "omegaconf>=2.3.0",
+    "submitit>=1.5.3",
+    "torch>=2.7.1",
+    "torchmetrics>=1.7.4",
+    "torchvision>=0.22.1",
+    "webdataset>=1.0.2",
+]
+
+
 [tool.black]
 line-length = 120
 
@@ -7,10 +25,7 @@ score = false
 
 [tool.pylint.messages_control]
 disable = "all"
-enable = [
-  "miscellaneous",
-  "similarities",
-]
+enable = ["miscellaneous", "similarities"]
 
 [tool.pylint.similarities]
 ignore-comments = true
@@ -22,8 +37,4 @@ min-similarity-lines = 8
 reports = false
 
 [tool.pylint.miscellaneous]
-notes = [
-  "FIXME",
-  "XXX",
-  "TODO",
-]
+notes = ["FIXME", "XXX", "TODO"]
