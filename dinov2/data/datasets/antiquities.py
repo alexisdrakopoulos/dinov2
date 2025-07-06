@@ -57,6 +57,11 @@ def create_webdataset(
         )  # 2. Decode the image from bytes to PIL. The sample is still a dict.
         .map(map_sample)  # 3. Now, map the dict to the (image, target) tuple.
     )
+
+    if transform is not None and target_transform is not None:
+        logger.info("Applying DINOv2 transforms to the WebDataset pipeline.")
+        dataset = dataset.map_tuple(transform, target_transform)
+
     total_samples = 2_700_000  # estimate of number of samples in the dataset
     dataset = dataset.with_length(total_samples)
 
