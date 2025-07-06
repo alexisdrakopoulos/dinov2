@@ -13,6 +13,7 @@ import dinov2.distributed as distributed
 logger = logging.getLogger("dinov2")
 
 # --- Helper Classes and Functions ---
+ROOT = "augmented_data/"
 
 
 class ImageDataset(Dataset):
@@ -26,7 +27,7 @@ class ImageDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        path = self.image_paths[idx]
+        path = ROOT + self.image_paths[idx]
         try:
             image = Image.open(path).convert("RGB")
             return self.transform(image)
