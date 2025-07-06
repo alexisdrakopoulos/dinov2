@@ -31,6 +31,6 @@ eval:
   retrieval:
     enabled: true
     # Directory containing your 'all_paths.json' and 'ground_truth.json'
-    benchmark_dir: "data/benchmark_assets"
+    benchmark_dir: "augmented_data/benchmark_assets"
     batch_size: 512
     recall_ks: [1, 5, 10, 50, 100]
