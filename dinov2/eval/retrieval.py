@@ -108,7 +108,7 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
                 images = batch.to("cuda", non_blocking=True)
                 # DINOv2's forward pass returns a dict. We want the CLS token feature.
                 with autocast(dtype=torch.float16):
-                    features = eval_model.backbone(images)["x_norm_clstoken"]
+                    features = eval_model.backbone(images)
                 features /= features.norm(dim=-1, keepdim=True)  # Normalize
                 all_embeddings.append(features.cpu().numpy())
 
