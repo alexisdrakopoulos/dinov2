@@ -5,7 +5,7 @@ ibot:
   separate_head: true
   head_n_prototypes: 131072
 train:
-  batch_size_per_gpu: 512
+  batch_size_per_gpu: 600
   dataset_path: ImageNet22k
   centering: sinkhorn_knopp
 student:
@@ -18,9 +18,10 @@ teacher:
   momentum_teacher: 0.994
 optim:
   epochs: 100
+  weight_decay: 0.02
   weight_decay_end: 0.4
-  base_lr: 0.004  # learning rate for a batch size of 1024
-  warmup_epochs: 10
+  base_lr: 0.001  # learning rate for a batch size of 1024
+  warmup_epochs: 5
   layerwise_decay: 1.0
 crops:
   local_crops_size: 98
