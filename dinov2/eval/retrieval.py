@@ -9,6 +9,7 @@ import faiss
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import dinov2.distributed as distributed
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 logger = logging.getLogger("dinov2")
 
@@ -59,9 +60,6 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
 
     # Use the teacher model for evaluation
     eval_model = model.teacher
-    eval_model.eval()
-
-    # --- 1. Configuration and Asset Loading ---
     eval_cfg = cfg.eval.retrieval
     benchmark_dir = eval_cfg.benchmark_dir
     all_paths_file = os.path.join(benchmark_dir, "all_paths.json")
@@ -102,13 +100,15 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     # --- 3. Compute Embeddings ---
     logger.info("Computing embeddings for the benchmark dataset...")
     all_embeddings = []
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Computing Embeddings"):
-            images = batch.to("cuda" if torch.cuda.is_available() else "cpu")
-            # DINOv2's forward pass returns a dict. We want the CLS token feature.
-            features = eval_model(images)["x_norm_clstoken"]
-            features /= features.norm(dim=-1, keepdim=True)  # Normalize
-            all_embeddings.append(features.cpu().numpy())
+    with FSDP.summon_full_params(eval_model, writeback=False, rank0_only=False):
+        eval_model.eval()
+        with torch.no_grad():
+            for batch in tqdm(dataloader, desc="Computing Embeddings"):
+                images = batch.to("cuda" if torch.cuda.is_available() else "cpu")
+                # DINOv2's forward pass returns a dict. We want the CLS token feature.
+                features = eval_model.backbone(images)["x_norm_clstoken"]
+                features /= features.norm(dim=-1, keepdim=True)  # Normalize
+                all_embeddings.append(features.cpu().numpy())
 
     master_embeddings = np.vstack(all_embeddings)
 
@@ -165,4 +165,4 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     logger.info(f"Retrieval results saved to {results_path}")
 
     # Put the model back in training mode
-    eval_model.train()
+    # eval_model.train()
