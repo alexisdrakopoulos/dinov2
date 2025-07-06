@@ -104,7 +104,7 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     all_embeddings = []
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Computing Embeddings"):
-            images = batch.to(model.device)
+            images = batch.to("cuda" if torch.cuda.is_available() else "cpu")
             # DINOv2's forward pass returns a dict. We want the CLS token feature.
             features = eval_model(images)["x_norm_clstoken"]
             features /= features.norm(dim=-1, keepdim=True)  # Normalize
