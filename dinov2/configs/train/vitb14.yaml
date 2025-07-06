@@ -27,7 +27,7 @@ crops:
 eval:
   # This sets how often to run the evaluation loop (in iterations).
   # Set it to the same as OFFICIAL_EPOCH_LENGTH to run once per epoch.
-  eval_period_iterations: 32
+  eval_period_iterations: 100
   retrieval:
     enabled: true
     # Directory containing your 'all_paths.json' and 'ground_truth.json'
