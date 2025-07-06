@@ -1,0 +1,36 @@
+dino:
+  head_n_prototypes: 131072
+  head_bottleneck_dim: 384
+ibot:
+  separate_head: true
+  head_n_prototypes: 131072
+train:
+  batch_size_per_gpu: 64
+  dataset_path: ImageNet22k
+  centering: sinkhorn_knopp
+student:
+  arch: vit_base
+  patch_size: 14
+  drop_path_rate: 0.4
+  ffn_layer: swiglufused
+  block_chunks: 4
+teacher:
+  momentum_teacher: 0.994
+optim:
+  epochs: 500
+  weight_decay_end: 0.2
+  base_lr: 2.0e-04  # learning rate for a batch size of 1024
+  warmup_epochs: 80
+  layerwise_decay: 1.0
+crops:
+  local_crops_size: 98
+eval:
+  # This sets how often to run the evaluation loop (in iterations).
+  # Set it to the same as OFFICIAL_EPOCH_LENGTH to run once per epoch.
+  eval_period_iterations: 1024
+  retrieval:
+    enabled: true
+    # Directory containing your 'all_paths.json' and 'ground_truth.json'
+    benchmark_dir: "data/benchmark_assets"
+    batch_size: 512
+    recall_ks: [1, 5, 10, 50, 100]

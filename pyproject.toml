@@ -5,6 +5,7 @@ description = "DinoV2 fork for Self Supervised Learning on Unlabeled Images"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "faiss-cpu>=1.11.0",
     "fvcore>=0.1.5.post20221221",
     "iopath>=0.1.10",
     "omegaconf>=2.3.0",
