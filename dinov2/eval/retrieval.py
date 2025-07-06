@@ -10,7 +10,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import dinov2.distributed as distributed
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.cuda.amp import autocast
 
 logger = logging.getLogger("dinov2")
 
@@ -107,7 +106,7 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
             for batch in tqdm(dataloader, desc="Computing Embeddings"):
                 images = batch.to("cuda", non_blocking=True)
                 # DINOv2's forward pass returns a dict. We want the CLS token feature.
-                with autocast(dtype=torch.float16):
+                with torch.amp.autocast("cuda", dtype=torch.float16):
                     features = eval_model.backbone(images)
                 features /= features.norm(dim=-1, keepdim=True)  # Normalize
                 all_embeddings.append(features.cpu().numpy())
