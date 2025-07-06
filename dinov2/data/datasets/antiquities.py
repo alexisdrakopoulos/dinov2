@@ -51,11 +51,12 @@ def create_webdataset(
         return image, target
 
     dataset: wds.WebDataset = (
-        dataset.shuffle(5128)  # Buffer size for shuffling samples within a shard
-        .map(map_sample)
-        .decode("pil")  # Decode the first element of the tuple (the image)
+        dataset.shuffle(5128)  # 1. Shuffle shards and samples
+        .decode(
+            "pil"
+        )  # 2. Decode the image from bytes to PIL. The sample is still a dict.
+        .map(map_sample)  # 3. Now, map the dict to the (image, target) tuple.
     )
-
     total_samples = 2_700_000  # estimate of number of samples in the dataset
     dataset = dataset.with_length(total_samples)
 
