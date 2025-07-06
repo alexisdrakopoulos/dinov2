@@ -8,6 +8,7 @@ from tqdm import tqdm
 import faiss
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+import dinov2.distributed as distributed
 
 logger = logging.getLogger("dinov2")
 
@@ -52,7 +53,7 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     3. Queries the index and calculates Recall@k.
     """
     # This evaluation should only run on the main process
-    if not torch.distributed.is_main_process():
+    if not distributed.is_main_process():
         return
 
     # Use the teacher model for evaluation
