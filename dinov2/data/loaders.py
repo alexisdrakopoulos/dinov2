@@ -204,7 +204,7 @@ def make_data_loader(
         collate_fn: Function that performs batch collation
     """
 
-    if isinstance(dataset, wds.WebDataset):
+    if isinstance(dataset, wds.WebDataset) or isinstance(dataset, wds.DataPipeline):
         logger.info("Using a WebDataset, PyTorch sampler will be disabled.")
         sampler = None
     else:
