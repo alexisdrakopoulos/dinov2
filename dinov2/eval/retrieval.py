@@ -10,6 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import dinov2.distributed as distributed
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+import torch.distributed as dist
 
 logger = logging.getLogger("dinov2")
 
@@ -57,6 +58,11 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     # This evaluation should only run on the main process
     if not distributed.is_main_process():
         return
+
+    if not isinstance(model, FSDP):
+        print(
+            f"FATAL: RANK received a model of type {type(model)}, not FSDP. This will hang."
+        )
 
     logger.info("starting retrieval evaluation...")
     # Use the teacher model for evaluation
@@ -178,9 +184,9 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
                 json.dump(results, f, indent=2)
             logger.info(f"Retrieval results saved to {results_path}")
 
-    logger.info(f"Rank {distributed.get_rank()} waiting at barrier.")
-    torch.distributed.barrier()
-    logger.info(f"Rank {distributed.get_rank()} passed barrier.")
+    logger.info("waiting at barrier.")
+    dist.barrier()
+    logger.info("passed barrier.")
 
     # Put the model back in training mode
     eval_model.train()
