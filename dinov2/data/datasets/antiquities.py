@@ -96,6 +96,8 @@ def create_webdataset(
     # --- 4. Create the final dataset object from the pipeline list ---
     dataset = wds.DataPipeline(*pipeline)
 
+    dataset.with_length = 2_700_000
+
     # --- 5. Set the dataset length for the trainer ---
     try:
         world_size = int(os.environ.get("WORLD_SIZE", 1))
