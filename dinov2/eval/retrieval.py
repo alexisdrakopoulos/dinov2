@@ -11,6 +11,7 @@ from torchvision import transforms
 import dinov2.distributed as distributed
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 import torch.distributed as dist
+import dinov2.distributed as dinov2_dist
 
 logger = logging.getLogger("dinov2")
 
@@ -55,19 +56,19 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     2. Builds a FAISS index.
     3. Queries the index and calculates Recall@k.
     """
-    # This evaluation should only run on the main process
-    if not distributed.is_main_process():
-        return
+    rank = dinov2_dist.get_global_rank()
 
-    if not isinstance(model, FSDP):
+    eval_fsdp_module = model.teacher.backbone
+
+    if not isinstance(eval_fsdp_module, FSDP):
         print(
-            f"FATAL: RANK received a model of type {type(model)}, not FSDP. This will hang."
+            f"FATAL on RANK {rank}: The target module 'model.teacher.backbone' is of type "
+            f"{type(eval_fsdp_module)}, not FSDP. This will hang. "
+            "Check the prepare_for_distributed_training() method."
         )
 
-    logger.info("starting retrieval evaluation...")
-    # Use the teacher model for evaluation
-    eval_model = model.teacher
-    with FSDP.summon_full_params(eval_model, writeback=False, rank0_only=True):
+    logger.info(f"Rank {rank}: Starting retrieval evaluation on teacher backbone.")
+    with FSDP.summon_full_params(eval_fsdp_module, writeback=False, rank0_only=True):
         logger.info("Model parameters loaded on Rank 0.")
         # --- 2. Main Process Guard ---
         # Now that the model is ready on Rank 0, we can have only Rank 0 do the work.
@@ -115,14 +116,14 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
             logger.info("Computing embeddings for the benchmark dataset...")
             all_embeddings = []
             logger.info("Setting model to evaluation mode...")
-            eval_model.eval()
+            eval_fsdp_module.eval()
             with torch.no_grad():
                 logger.info("Processing images in batches...")
                 for batch in tqdm(dataloader, desc="Computing Embeddings"):
                     images = batch.to("cuda", non_blocking=True)
                     # DINOv2's forward pass returns a dict. We want the CLS token feature.
                     with torch.amp.autocast("cuda", dtype=torch.float16):
-                        features = eval_model.backbone(images)
+                        features = eval_fsdp_module(images)
                     features /= features.norm(dim=-1, keepdim=True)  # Normalize
                     all_embeddings.append(features.cpu().numpy())
 
@@ -187,6 +188,3 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     logger.info("waiting at barrier.")
     dist.barrier()
     logger.info("passed barrier.")
-
-    # Put the model back in training mode
-    eval_model.train()
