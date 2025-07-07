@@ -68,122 +68,118 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
         )
 
     logger.info(f"Rank {rank}: Starting retrieval evaluation on teacher backbone.")
-    with FSDP.summon_full_params(eval_fsdp_module, writeback=False, rank0_only=True):
-        logger.info("Model parameters loaded on Rank 0.")
-        # --- 2. Main Process Guard ---
-        # Now that the model is ready on Rank 0, we can have only Rank 0 do the work.
-        if distributed.is_main_process():
-            eval_cfg = cfg.eval.retrieval
-            benchmark_dir = eval_cfg.benchmark_dir
-            all_paths_file = os.path.join(benchmark_dir, "all_paths.json")
-            ground_truth_file = os.path.join(benchmark_dir, "ground_truth.json")
+    # with FSDP.summon_full_params(eval_fsdp_module, writeback=False, rank0_only=True):
+    logger.info("Model parameters loaded on Rank 0.")
+    # --- 2. Main Process Guard ---
+    # Now that the model is ready on Rank 0, we can have only Rank 0 do the work.
+    if distributed.is_main_process():
+        eval_cfg = cfg.eval.retrieval
+        benchmark_dir = eval_cfg.benchmark_dir
+        all_paths_file = os.path.join(benchmark_dir, "all_paths.json")
+        ground_truth_file = os.path.join(benchmark_dir, "ground_truth.json")
 
-            logger.info("--- Starting Image Retrieval Evaluation ---")
-            logger.info(f"Loading assets from: {benchmark_dir}")
+        logger.info("--- Starting Image Retrieval Evaluation ---")
+        logger.info(f"Loading assets from: {benchmark_dir}")
 
-            with open(all_paths_file, "r") as f:
-                all_paths = json.load(f)
-            with open(ground_truth_file, "r") as f:
-                ground_truth = json.load(f)
+        with open(all_paths_file, "r") as f:
+            all_paths = json.load(f)
+        with open(ground_truth_file, "r") as f:
+            ground_truth = json.load(f)
 
-            # --- 2. Setup Dataset and Dataloader ---
-            # Define a standard evaluation transform
-            # Use the same resolution as DINOv2's global crops
-            eval_transform = transforms.Compose(
-                [
-                    transforms.Resize(
-                        cfg.crops.global_crops_size,
-                        interpolation=transforms.InterpolationMode.BICUBIC,
-                    ),
-                    transforms.CenterCrop(cfg.crops.global_crops_size),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
-                    ),
-                ]
-            )
+        # --- 2. Setup Dataset and Dataloader ---
+        # Define a standard evaluation transform
+        # Use the same resolution as DINOv2's global crops
+        eval_transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    cfg.crops.global_crops_size,
+                    interpolation=transforms.InterpolationMode.BICUBIC,
+                ),
+                transforms.CenterCrop(cfg.crops.global_crops_size),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
+                ),
+            ]
+        )
 
-            dataset = ImageDataset(all_paths, eval_transform)
-            dataloader = DataLoader(
-                dataset,
-                batch_size=eval_cfg.batch_size,
-                shuffle=False,
-                num_workers=cfg.train.num_workers,
-                pin_memory=True,
-            )
+        dataset = ImageDataset(all_paths, eval_transform)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=eval_cfg.batch_size,
+            shuffle=False,
+            num_workers=cfg.train.num_workers,
+            pin_memory=True,
+        )
 
-            # --- 3. Compute Embeddings ---
-            logger.info("Computing embeddings for the benchmark dataset...")
-            all_embeddings = []
-            logger.info("Setting model to evaluation mode...")
-            eval_fsdp_module.eval()
-            with torch.no_grad():
-                logger.info("Processing images in batches...")
-                for batch in tqdm(dataloader, desc="Computing Embeddings"):
-                    images = batch.to("cuda", non_blocking=True)
-                    # DINOv2's forward pass returns a dict. We want the CLS token feature.
-                    with torch.amp.autocast("cuda", dtype=torch.float16):
-                        features = eval_fsdp_module(images)
-                    features /= features.norm(dim=-1, keepdim=True)  # Normalize
-                    all_embeddings.append(features.cpu().numpy())
+        # --- 3. Compute Embeddings ---
+        logger.info("Computing embeddings for the benchmark dataset...")
+        all_embeddings = []
+        logger.info("Setting model to evaluation mode...")
+        eval_fsdp_module.eval()
+        with torch.no_grad():
+            logger.info("Processing images in batches...")
+            for batch in tqdm(dataloader, desc="Computing Embeddings"):
+                images = batch.to("cuda", non_blocking=True)
+                # DINOv2's forward pass returns a dict. We want the CLS token feature.
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    features = eval_fsdp_module(images)
+                features /= features.norm(dim=-1, keepdim=True)  # Normalize
+                all_embeddings.append(features.cpu().numpy())
 
-            master_embeddings = np.vstack(all_embeddings)
+        master_embeddings = np.vstack(all_embeddings)
 
-            # --- 4. FAISS Indexing and Search ---
-            logger.info("Building FAISS index...")
-            d = master_embeddings.shape[1]
-            index = faiss.IndexFlatL2(d)
-            index.add(master_embeddings.astype("float32"))
-            logger.info(f"FAISS index built with {index.ntotal} vectors.")
+        # --- 4. FAISS Indexing and Search ---
+        logger.info("Building FAISS index...")
+        d = master_embeddings.shape[1]
+        index = faiss.IndexFlatL2(d)
+        index.add(master_embeddings.astype("float32"))
+        logger.info(f"FAISS index built with {index.ntotal} vectors.")
 
-            path_to_idx = {path: i for i, path in enumerate(all_paths)}
-            query_paths = list(ground_truth.keys())
-            query_indices = [path_to_idx[p] for p in query_paths]
-            query_embeddings = master_embeddings[query_indices]
+        path_to_idx = {path: i for i, path in enumerate(all_paths)}
+        query_paths = list(ground_truth.keys())
+        query_indices = [path_to_idx[p] for p in query_paths]
+        query_embeddings = master_embeddings[query_indices]
 
-            # We search for max(RECALL_KS) + 1 because the top result is often the query itself.
-            recall_ks = eval_cfg.recall_ks
-            search_k = max(recall_ks) + 1
-            logger.info(f"Performing batched search for top {search_k} results...")
-            _, top_k_indices = index.search(
-                query_embeddings.astype("float32"), search_k
-            )
+        # We search for max(RECALL_KS) + 1 because the top result is often the query itself.
+        recall_ks = eval_cfg.recall_ks
+        search_k = max(recall_ks) + 1
+        logger.info(f"Performing batched search for top {search_k} results...")
+        _, top_k_indices = index.search(query_embeddings.astype("float32"), search_k)
 
-            # --- 5. Calculate Metrics ---
-            recall_scores = {k: 0 for k in recall_ks}
-            num_queries = len(query_paths)
+        # --- 5. Calculate Metrics ---
+        recall_scores = {k: 0 for k in recall_ks}
+        num_queries = len(query_paths)
 
-            for i in tqdm(range(num_queries), desc="Calculating Recall@k"):
-                query_path = query_paths[i]
-                retrieved_indices = top_k_indices[i]
-                retrieved_paths = [
-                    all_paths[idx] for idx in retrieved_indices if idx != -1
-                ]
+        for i in tqdm(range(num_queries), desc="Calculating Recall@k"):
+            query_path = query_paths[i]
+            retrieved_indices = top_k_indices[i]
+            retrieved_paths = [all_paths[idx] for idx in retrieved_indices if idx != -1]
 
-                # Filter out the query itself from the results
-                filtered_results = [p for p in retrieved_paths if p != query_path]
+            # Filter out the query itself from the results
+            filtered_results = [p for p in retrieved_paths if p != query_path]
 
-                true_positives = ground_truth[query_path]
-                for k in recall_ks:
-                    if calculate_recall_at_k(filtered_results, true_positives, k):
-                        recall_scores[k] += 1
-
-            # --- 6. Log and Save Results ---
-            results = {}
-            logger.info("--- Retrieval Benchmark Results ---")
+            true_positives = ground_truth[query_path]
             for k in recall_ks:
-                score = (recall_scores[k] / num_queries) * 100
-                logger.info(f"Recall@{k:<3}: {score:.2f}%")
-                results[f"Recall@{k}"] = score
-            logger.info("-----------------------------------")
+                if calculate_recall_at_k(filtered_results, true_positives, k):
+                    recall_scores[k] += 1
 
-            # Save results to a file for tracking
-            eval_dir = os.path.join(cfg.train.output_dir, "eval", iteration_info)
-            os.makedirs(eval_dir, exist_ok=True)
-            results_path = os.path.join(eval_dir, "retrieval_results.json")
-            with open(results_path, "w") as f:
-                json.dump(results, f, indent=2)
-            logger.info(f"Retrieval results saved to {results_path}")
+        # --- 6. Log and Save Results ---
+        results = {}
+        logger.info("--- Retrieval Benchmark Results ---")
+        for k in recall_ks:
+            score = (recall_scores[k] / num_queries) * 100
+            logger.info(f"Recall@{k:<3}: {score:.2f}%")
+            results[f"Recall@{k}"] = score
+        logger.info("-----------------------------------")
+
+        # Save results to a file for tracking
+        eval_dir = os.path.join(cfg.train.output_dir, "eval", iteration_info)
+        os.makedirs(eval_dir, exist_ok=True)
+        results_path = os.path.join(eval_dir, "retrieval_results.json")
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        logger.info(f"Retrieval results saved to {results_path}")
 
     logger.info("waiting at barrier.")
     dist.barrier()
