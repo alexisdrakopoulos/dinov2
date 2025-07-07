@@ -1,9 +1,19 @@
 import logging
+import os
 from typing import Callable, Optional
 import webdataset as wds
-from webdataset.shardlists import split_by_node, split_by_worker
+
+# We need these components to build the pipeline list
+from webdataset.tariterators import tarfile_to_samples
 
 logger = logging.getLogger("dinov2")
+
+
+# This is a helper function to handle exceptions during processing, like OpenCLIP does.
+def log_and_continue(exn):
+    """Call in an exception handler to ignore any exception, issue a warning, and continue."""
+    logger.warning(f"Handling webdataset error ({repr(exn)}). Ignoring and continuing.")
+    return True
 
 
 def create_webdataset(
@@ -11,61 +21,96 @@ def create_webdataset(
     root: str,
     transform: Optional[Callable] = None,
     target_transform: Optional[Callable] = None,
+    # Add a flag to easily control resampling
+    resample_shards: bool = True,
     **kwargs,
 ):
     """
-    Creates a WebDataset instance for DINOv2 self-supervised learning.
-
-    Args:
-        root (str): The path to the webdataset shards, supporting shell-like globbing.
-            For example: "/path/to/shards/dataset-{000000..000127}.tar"
-        transform (Optional[Callable]): A function/transform that takes in an image
-            and returns a transformed version.
-        target_transform (Optional[Callable]): A function/transform that takes in the
-            target and transforms it. In DINOv2 SSL, this is usually a dummy function.
-        **kwargs: Extra arguments (unused here but good for compatibility).
+    Creates a WebDataset instance for DINOv2 self-supervised learning,
+    using the wds.DataPipeline constructor for compatibility and clarity.
     """
     logger.info(f"Creating a WebDataset from {root}")
 
-    # The `resampled=True` argument randomly samples from the shards with replacement.
-    # This is great for "infinite" datasets and ensures good shuffling.
-    dataset: wds.WebDataset = wds.WebDataset(root, resampled=True)
-    dataset = dataset.pipe(split_by_node).pipe(split_by_worker)
+    # --- 1. Define the list of processing stages, like in OpenCLIP ---
+    pipeline = []
 
-    # The processing pipeline for WebDataset.
-    # 1. Shuffle shards and samples within shards.
-    # 2. Decode the image from bytes to a PIL Image.
-    # 3. For SSL, we only need the image. The target is discarded later.
-    #    Here we map the dictionary to a tuple containing only the transformed image.
-    #    DINOv2's `collate_fn` and training loop expect a (image, target) tuple.
-    #    The provided `transform` is actually `DataAugmentationDINO`, which returns a
-    #    dictionary of tensors. The `target_transform` is `lambda _: ()`.
-    #    The dataset should yield a tuple `(image, target)`.
-    #
-    # We will let the `_make_sample_transform` wrapper in loaders.py handle the
-    # separate `transform` and `target_transform`. Our job is to yield the
-    # raw (PIL Image, empty_target) tuple.
+    if resample_shards:
+        # Use ResampledShards to continuously sample from the shard list.
+        # This is great for "infinite" training.
+        pipeline.extend(
+            [
+                wds.ResampledShards(root),
+                # NOTE: With ResampledShards, splitting happens *after* a shard is chosen.
+                # The splitters ensure that each worker process gets unique samples from within the shard.
+                # DINOv2's original implementation implies this is the desired behavior for SSL.
+                wds.split_by_worker,
+            ]
+        )
+    else:
+        # For sequential, non-resampled training (e.g., validation)
+        pipeline.extend(
+            [
+                wds.SimpleShardList(root),
+                wds.split_by_node,
+                wds.split_by_worker,
+                # You might want to shuffle the order of shards each epoch
+                wds.shuffle(100, initial=10),
+            ]
+        )
+
+    # --- 2. Add stages for processing the data within the shards ---
+
+    # This stage opens the .tar files and yields individual files ({'__key__': '...', 'image.jpg': ...})
+    # We use `handler=log_and_continue` to make it robust to corrupted tars.
+    pipeline.append(tarfile_to_samples(handler=log_and_continue))
+
+    # Shuffle the samples coming from the tars. This is the main shuffling buffer.
+    pipeline.append(wds.shuffle(5128, initial=512))
+
+    # Decode the image data
+    pipeline.append(wds.decode("pil", handler=log_and_continue))
+
+    # --- 3. Map the data to the format DINOv2 expects ---
     def map_sample(sample):
-        # Assumes your webdataset has a key 'image.jpg' for the image
-        image = sample["image.jpg"]
-        # The target is a placeholder for SSL, DINOv2 will ignore it.
-        target = -1  # or {} or None
+        # Find the image key robustly
+        image_key = next(
+            (key for key in sample if key.endswith((".jpg", ".jpeg", ".png"))), None
+        )
+        if image_key is None:
+            # Skip this sample if no image is found
+            return None
+        image = sample[image_key]
+        # Target is a placeholder for Self-Supervised Learning
+        target = -1
         return image, target
 
-    dataset: wds.WebDataset = (
-        dataset.shuffle(5128)  # 1. Shuffle shards and samples
-        .decode(
-            "pil"
-        )  # 2. Decode the image from bytes to PIL. The sample is still a dict.
-        .map(map_sample)  # 3. Now, map the dict to the (image, target) tuple.
-    )
+    # Apply the map function and filter out any None samples (e.g., from decoding errors)
+    pipeline.append(wds.map(map_sample))
+    pipeline.append(wds.select(lambda x: x is not None))
 
+    # Apply the DINOv2-specific data augmentations
     if transform is not None and target_transform is not None:
         logger.info("Applying DINOv2 transforms to the WebDataset pipeline.")
-        dataset = dataset.map_tuple(transform, target_transform)
+        pipeline.append(wds.map_tuple(transform, target_transform))
 
-    total_samples = 2_700_000  # estimate of number of samples in the dataset
-    dataset = dataset.with_length(total_samples)
+    # --- 4. Create the final dataset object from the pipeline list ---
+    dataset = wds.DataPipeline(*pipeline)
 
-    logger.info("WebDataset created successfully.")
+    # --- 5. Set the dataset length for the trainer ---
+    try:
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        # This is an estimate for the progress bar.
+        num_samples_per_process = 2_700_000 // world_size
+        dataset = dataset.with_epoch(num_samples_per_process)
+        logger.info(
+            f"Estimated {num_samples_per_process} samples per process (world size: {world_size})."
+        )
+    except (ValueError, TypeError, ZeroDivisionError):
+        # Fallback if WORLD_SIZE is not set or invalid
+        logger.warning(
+            "Could not determine world size. Using total sample count for length."
+        )
+        dataset = dataset.with_length(2_700_000)
+
+    logger.info("WebDataset created successfully using the DataPipeline pattern.")
     return dataset
