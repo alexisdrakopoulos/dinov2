@@ -18,10 +18,10 @@ teacher:
   momentum_teacher: 0.994
 optim:
   epochs: 50
-  weight_decay: 0.002
+  weight_decay: 0.004
   weight_decay_end: 0.4
   base_lr: 0.0005  # learning rate for a batch size of 1024
-  warmup_epochs: 2
+  warmup_epochs: 5
   layerwise_decay: 1.0
 crops:
   local_crops_size: 98
