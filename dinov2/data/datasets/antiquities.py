@@ -1,6 +1,7 @@
 import logging
 from typing import Callable, Optional
 import webdataset as wds
+from webdataset.shardlists import split_by_node, split_by_worker
 
 logger = logging.getLogger("dinov2")
 
@@ -29,6 +30,7 @@ def create_webdataset(
     # The `resampled=True` argument randomly samples from the shards with replacement.
     # This is great for "infinite" datasets and ensures good shuffling.
     dataset: wds.WebDataset = wds.WebDataset(root, resampled=True)
+    dataset = dataset.then(split_by_node).then(split_by_worker)
 
     # The processing pipeline for WebDataset.
     # 1. Shuffle shards and samples within shards.
