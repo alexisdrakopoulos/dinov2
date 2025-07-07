@@ -58,10 +58,11 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     if not distributed.is_main_process():
         return
 
-    logger.info(f"Rank {distributed.get_rank()} starting retrieval evaluation...")
+    logger.info("starting retrieval evaluation...")
     # Use the teacher model for evaluation
     eval_model = model.teacher
     with FSDP.summon_full_params(eval_model, writeback=False, rank0_only=True):
+        logger.info("Model parameters loaded on Rank 0.")
         # --- 2. Main Process Guard ---
         # Now that the model is ready on Rank 0, we can have only Rank 0 do the work.
         if distributed.is_main_process():
