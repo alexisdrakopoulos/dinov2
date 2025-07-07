@@ -11,7 +11,7 @@ from functools import partial
 
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
-
+import torch.distributed as dist
 from dinov2.data import SamplerType, make_data_loader, make_dataset
 from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator
 import dinov2.distributed as distributed
@@ -310,6 +310,7 @@ def do_train(cfg, model, resume=False):
             cfg.evaluation.eval_period_iterations > 0
             and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0
         ):
+            dist.barrier()
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
