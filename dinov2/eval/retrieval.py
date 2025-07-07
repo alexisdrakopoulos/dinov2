@@ -60,18 +60,31 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
 
     eval_fsdp_module = model.teacher.backbone
 
-    if not isinstance(eval_fsdp_module, FSDP):
-        print(
-            f"FATAL on RANK {rank}: The target module 'model.teacher.backbone' is of type "
-            f"{type(eval_fsdp_module)}, not FSDP. This will hang. "
-            "Check the prepare_for_distributed_training() method."
-        )
+    is_fsdp = isinstance(eval_fsdp_module, FSDP)
+    if is_fsdp:
+        logger.info(f"Rank {rank}: Preparing for FSDP evaluation on teacher backbone.")
+    elif rank == 0:
+        logger.warning("Target module is not FSDP. Running standard evaluation.")
 
     logger.info(f"Rank {rank}: Setting model to eval mode.")
     eval_fsdp_module.eval()
 
+    if is_fsdp:
+        logger.info(f"Rank {rank}: Synchronizing model buffers before evaluation...")
+        with torch.no_grad():
+            for buffer in eval_fsdp_module.buffers():
+                dist.broadcast(buffer, src=0)
+        torch.cuda.synchronize()  # Ensure broadcast is complete
+        logger.info(f"Rank {rank}: Buffer synchronization complete.")
+
+    context_manager = (
+        FSDP.summon_full_params(eval_fsdp_module, writeback=False, rank0_only=True)
+        if is_fsdp
+        else torch.no_grad()  # Or any null context manager
+    )
+
     logger.info(f"Rank {rank}: Starting retrieval evaluation on teacher backbone.")
-    with FSDP.summon_full_params(eval_fsdp_module, writeback=False, rank0_only=True):
+    with context_manager:
         logger.info("Model parameters loaded on Rank 0.")
         # --- 2. Main Process Guard ---
         # Now that the model is ready on Rank 0, we can have only Rank 0 do the work.
