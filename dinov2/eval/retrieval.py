@@ -101,8 +101,10 @@ def run_retrieval_evaluation(model, cfg, iteration_info):
     logger.info("Computing embeddings for the benchmark dataset...")
     all_embeddings = []
     with FSDP.summon_full_params(eval_model, writeback=False, rank0_only=False):
+        logger.info("Setting model to evaluation mode...")
         eval_model.eval()
         with torch.no_grad():
+            logger.info("Processing images in batches...")
             for batch in tqdm(dataloader, desc="Computing Embeddings"):
                 images = batch.to("cuda", non_blocking=True)
                 # DINOv2's forward pass returns a dict. We want the CLS token feature.

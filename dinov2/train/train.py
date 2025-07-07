@@ -131,6 +131,8 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
 def do_test(cfg, model, iteration):
     new_state_dict = model.teacher.state_dict()
 
+    logger.info("Running evaluation...")
+
     if distributed.is_main_process():
         iterstring = str(iteration)
         eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
