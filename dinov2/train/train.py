@@ -19,7 +19,6 @@ from dinov2.fsdp import FSDPCheckpointer
 from dinov2.logging import MetricLogger
 from dinov2.utils.config import setup
 from dinov2.utils.utils import CosineScheduler
-from dinov2.eval.retrieval import run_retrieval_evaluation
 
 from dinov2.train.ssl_meta_arch import SSLMetaArch
 
@@ -141,8 +140,8 @@ def do_test(cfg, model, iteration):
         teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
         torch.save({"teacher": new_state_dict}, teacher_ckp_path)
 
-        if cfg.eval.get("retrieval") and cfg.eval.retrieval.get("enabled", False):
-            run_retrieval_evaluation(model, cfg, iterstring)
+        # if cfg.eval.get("retrieval") and cfg.eval.retrieval.get("enabled", False):
+        #     run_retrieval_evaluation(model, cfg, iterstring)
 
 
 def do_train(cfg, model, resume=False):
